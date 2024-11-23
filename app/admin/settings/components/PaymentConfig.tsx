@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import type { PaymentConfig as TPaymentConfig } from '@/lib/payment-config';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 
 export function PaymentConfig() {
   const [config, setConfig] = useState<TPaymentConfig | null>(null);
@@ -15,7 +16,10 @@ export function PaymentConfig() {
   const [isSaving, setIsSaving] = useState(false);
   const [sumupKey, setSumupKey] = useState('');
   const [sumupMerchantEmail, setSumupMerchantEmail] = useState('');
+  const [stripePublishableKey, setStripePublishableKey] = useState('');
+  const [stripeSecretKey, setStripeSecretKey] = useState('');
   const [isEnabled, setIsEnabled] = useState(false);
+  const [activeGateway, setActiveGateway] = useState<'sumup' | 'stripe'>('sumup');
   const { toast } = useToast();
 
   const fetchConfig = async () => {
@@ -42,7 +46,10 @@ export function PaymentConfig() {
       setConfig(data);
       setSumupKey(data.sumupKey || '');
       setSumupMerchantEmail(data.sumupMerchantEmail || '');
+      setStripePublishableKey(data.stripePublishableKey || '');
+      setStripeSecretKey(data.stripeSecretKey || '');
       setIsEnabled(data.isEnabled);
+      setActiveGateway(data.activeGateway);
     } catch (error) {
       console.error('Failed to load config:', error);
       toast({
@@ -115,21 +122,26 @@ export function PaymentConfig() {
       return;
     }
 
-    if (!sumupKey.trim() || !sumupMerchantEmail.trim()) {
-      toast({
-        title: 'Error',
-        description: 'SumUp API key and merchant email are required',
-        variant: 'destructive',
-      });
-      return;
-    }
+    const validateGatewayConfig = () => {
+      if (activeGateway === 'sumup' && (!sumupKey.trim() || !sumupMerchantEmail.trim())) {
+        throw new Error('SumUp API key and merchant email are required');
+      }
+      if (activeGateway === 'stripe' && (!stripePublishableKey.trim() || !stripeSecretKey.trim())) {
+        throw new Error('Stripe publishable key and secret key are required');
+      }
+    };
 
     try {
       setIsSaving(true);
+      validateGatewayConfig();
+
       const updates = {
         isEnabled,
+        activeGateway,
         sumupKey: sumupKey.trim(),
         sumupMerchantEmail: sumupMerchantEmail.trim(),
+        stripePublishableKey: stripePublishableKey.trim(),
+        stripeSecretKey: stripeSecretKey.trim(),
       };
 
       const response = await fetch('/api/payment/config', {
@@ -155,6 +167,8 @@ export function PaymentConfig() {
       setConfig(updatedConfig);
       setSumupKey(updatedConfig.sumupKey || '');
       setSumupMerchantEmail(updatedConfig.sumupMerchantEmail || '');
+      setStripePublishableKey(updatedConfig.stripePublishableKey || '');
+      setStripeSecretKey(updatedConfig.stripeSecretKey || '');
 
       toast({
         title: 'Success',
@@ -202,27 +216,77 @@ export function PaymentConfig() {
         <div className="space-y-4 pt-6 border-t">
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="sumup-key">SumUp API Key</Label>
-              <Input
-                id="sumup-key"
-                type="password"
-                value={sumupKey}
-                onChange={(e) => setSumupKey(e.target.value)}
-                placeholder="Enter SumUp API key"
+              <Label>Active Payment Gateway</Label>
+              <RadioGroup
+                value={activeGateway}
+                onValueChange={(value: 'sumup' | 'stripe') => setActiveGateway(value)}
                 disabled={!isEnabled || isSaving}
-              />
+                className="flex flex-col space-y-2"
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="sumup" id="sumup" />
+                  <Label htmlFor="sumup">SumUp</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="stripe" id="stripe" />
+                  <Label htmlFor="stripe">Stripe</Label>
+                </div>
+              </RadioGroup>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="sumup-merchant-email">SumUp Merchant Email</Label>
-              <Input
-                id="sumup-merchant-email"
-                type="email"
-                value={sumupMerchantEmail}
-                onChange={(e) => setSumupMerchantEmail(e.target.value)}
-                placeholder="merchant@example.com"
-                disabled={!isEnabled || isSaving}
-              />
-            </div>
+
+            {activeGateway === 'sumup' && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="sumup-key">SumUp API Key</Label>
+                  <Input
+                    id="sumup-key"
+                    type="password"
+                    value={sumupKey}
+                    onChange={(e) => setSumupKey(e.target.value)}
+                    placeholder="Enter SumUp API key"
+                    disabled={!isEnabled || isSaving}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sumup-merchant-email">SumUp Merchant Email</Label>
+                  <Input
+                    id="sumup-merchant-email"
+                    type="email"
+                    value={sumupMerchantEmail}
+                    onChange={(e) => setSumupMerchantEmail(e.target.value)}
+                    placeholder="merchant@example.com"
+                    disabled={!isEnabled || isSaving}
+                  />
+                </div>
+              </div>
+            )}
+
+            {activeGateway === 'stripe' && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="stripe-publishable-key">Stripe Publishable Key</Label>
+                  <Input
+                    id="stripe-publishable-key"
+                    type="password"
+                    value={stripePublishableKey}
+                    onChange={(e) => setStripePublishableKey(e.target.value)}
+                    placeholder="pk_test_..."
+                    disabled={!isEnabled || isSaving}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="stripe-secret-key">Stripe Secret Key</Label>
+                  <Input
+                    id="stripe-secret-key"
+                    type="password"
+                    value={stripeSecretKey}
+                    onChange={(e) => setStripeSecretKey(e.target.value)}
+                    placeholder="sk_test_..."
+                    disabled={!isEnabled || isSaving}
+                  />
+                </div>
+              </div>
+            )}
 
             <Button 
               onClick={saveConfig} 
@@ -239,7 +303,8 @@ export function PaymentConfig() {
             <h3 className="text-lg font-medium mb-2">Current Configuration</h3>
             <div className="space-y-2">
               <p>
-                Provider: <span className="font-medium">SumUp</span>
+                Active Gateway:{' '}
+                <span className="font-medium capitalize">{config.activeGateway}</span>
               </p>
               <p>
                 Status:{' '}

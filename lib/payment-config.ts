@@ -4,8 +4,11 @@ import type { Database } from './database.types';
 export type PaymentConfig = {
   id?: number;
   isEnabled: boolean;
+  activeGateway: 'sumup' | 'stripe';
   sumupMerchantEmail?: string | null;
   sumupKey?: string | null;
+  stripePublishableKey?: string | null;
+  stripeSecretKey?: string | null;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -23,8 +26,11 @@ export const getPaymentConfig = async (): Promise<PaymentConfig> => {
       // No config exists, return default config
       return {
         isEnabled: false,
+        activeGateway: 'sumup',
         sumupMerchantEmail: null,
         sumupKey: null,
+        stripePublishableKey: null,
+        stripeSecretKey: null,
       };
     }
     throw error;
@@ -33,8 +39,11 @@ export const getPaymentConfig = async (): Promise<PaymentConfig> => {
   return {
     id: data.id,
     isEnabled: data.is_enabled,
+    activeGateway: data.active_gateway as 'sumup' | 'stripe',
     sumupMerchantEmail: data.sumup_merchant_email,
     sumupKey: data.sumup_key,
+    stripePublishableKey: data.stripe_publishable_key,
+    stripeSecretKey: data.stripe_secret_key,
     createdAt: data.created_at,
     updatedAt: data.updated_at
   };
@@ -50,8 +59,11 @@ export const updatePaymentConfig = async (config: Partial<PaymentConfig>): Promi
 
   const updates = {
     is_enabled: config.isEnabled ?? existing?.is_enabled ?? false,
+    active_gateway: config.activeGateway ?? existing?.active_gateway ?? 'sumup',
     sumup_merchant_email: config.sumupMerchantEmail ?? existing?.sumup_merchant_email ?? null,
     sumup_key: config.sumupKey ?? existing?.sumup_key ?? null,
+    stripe_publishable_key: config.stripePublishableKey ?? existing?.stripe_publishable_key ?? null,
+    stripe_secret_key: config.stripeSecretKey ?? existing?.stripe_secret_key ?? null,
     updated_at: new Date().toISOString()
   };
 
@@ -74,8 +86,11 @@ export const updatePaymentConfig = async (config: Partial<PaymentConfig>): Promi
   return {
     id: data.id,
     isEnabled: data.is_enabled,
+    activeGateway: data.active_gateway as 'sumup' | 'stripe',
     sumupMerchantEmail: data.sumup_merchant_email,
     sumupKey: data.sumup_key,
+    stripePublishableKey: data.stripe_publishable_key,
+    stripeSecretKey: data.stripe_secret_key,
     createdAt: data.created_at,
     updatedAt: data.updated_at
   };

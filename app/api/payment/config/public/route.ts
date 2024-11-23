@@ -6,7 +6,8 @@ export async function GET() {
     const config = await getPaymentConfig();
     
     return NextResponse.json({
-      provider: 'sumup',
+      activeGateway: config.activeGateway,
+      stripePublishableKey: config.stripePublishableKey,
       isEnabled: config.isEnabled,
       status: config.isEnabled ? 'available' : 'unavailable'
     }, {
@@ -17,7 +18,8 @@ export async function GET() {
   } catch (error) {
     console.error('Failed to get payment configuration:', error);
     return NextResponse.json({
-      provider: 'sumup',
+      activeGateway: 'sumup',
+      stripePublishableKey: null,
       isEnabled: false,
       status: 'error'
     }, { 
