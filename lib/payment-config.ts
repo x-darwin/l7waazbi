@@ -39,7 +39,7 @@ export const getPaymentConfig = async (): Promise<PaymentConfig> => {
   return {
     id: data.id,
     isEnabled: data.is_enabled,
-    activeGateway: data.active_gateway as 'sumup' | 'stripe',
+    activeGateway: data.active_gateway,
     sumupMerchantEmail: data.sumup_merchant_email,
     sumupKey: data.sumup_key,
     stripePublishableKey: data.stripe_publishable_key,
@@ -86,7 +86,7 @@ export const updatePaymentConfig = async (config: Partial<PaymentConfig>): Promi
   return {
     id: data.id,
     isEnabled: data.is_enabled,
-    activeGateway: data.active_gateway as 'sumup' | 'stripe',
+    activeGateway: data.active_gateway,
     sumupMerchantEmail: data.sumup_merchant_email,
     sumupKey: data.sumup_key,
     stripePublishableKey: data.stripe_publishable_key,

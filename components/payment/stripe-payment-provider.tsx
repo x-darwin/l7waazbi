@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Elements } from '@stripe/stripe-js';
-import { getClientStripe } from '@/lib/client-stripe';
+import { loadStripe, Stripe } from '@stripe/stripe-js';
 import { useToast } from '@/hooks/use-toast';
 
 interface StripePaymentProviderProps {
@@ -14,13 +13,13 @@ export function StripePaymentProvider({
   publishableKey,
   clientSecret,
 }: StripePaymentProviderProps) {
-  const [stripe, setStripe] = useState(null);
+  const [stripe, setStripe] = useState<Stripe | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
     const initStripe = async () => {
       try {
-        const stripeInstance = await getClientStripe(publishableKey);
+        const stripeInstance = await loadStripe(publishableKey);
         setStripe(stripeInstance);
       } catch (error) {
         console.error('Failed to initialize Stripe:', error);
@@ -39,22 +38,7 @@ export function StripePaymentProvider({
     return null;
   }
 
-  return (
-    <Elements
-      stripe={stripe}
-      options={{
-        clientSecret,
-        appearance: {
-          theme: 'stripe',
-          variables: {
-            colorPrimary: '#0091FF',
-            colorBackground: '#ffffff',
-            colorText: '#1a1a1a',
-          },
-        },
-      }}
-    >
-      {children}
-    </Elements>
-  );
+  // Note: We're not using Stripe Elements directly in this component
+  // Instead, we're passing the stripe instance to child components
+  return children;
 }

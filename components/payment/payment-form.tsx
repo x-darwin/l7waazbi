@@ -10,6 +10,7 @@ import { usePostHog } from 'posthog-js/react';
 import dynamic from 'next/dynamic';
 import { usePaymentGateway } from './payment-gateway-context';
 import { StripePaymentProvider } from './stripe-payment-provider';
+import { isValidCardNumber, isValidExpiryDate, isValidCVV, isValidEmail, isValidPhone, isValidName } from "./card-validation";
 
 // Lazy load heavy components
 const ThreeDSDialog = dynamic(() => import("./ThreeDSDialog").then(mod => ({ default: mod.ThreeDSDialog })), {
@@ -24,19 +25,264 @@ import { PersonalInformation } from "./sections/PersonalInformation";
 import { CardDetails } from "./sections/CardDetails";
 import { SecurityFeatures } from "./sections/SecurityFeatures";
 import { PaymentGatewaySection } from "./sections/PaymentGatewaySection";
-import { isValidCardNumber, isValidExpiryDate, isValidCVV, isValidEmail, isValidPhone, isValidName } from "./card-validation";
 
-// ... (keep all your existing interfaces and constants)
+const ComponentSkeleton = () => <Skeleton className="h-32 w-full" />;
+
+export interface Package {
+  id: string;
+  name: string;
+  price: number;
+  period: string;
+  description: string;
+  popular?: boolean;
+}
+
+export interface Feature {
+  id: string;
+  label: string;
+  price: number;
+}
+
+export interface Country {
+  code: string;
+  name: string;
+}
+
+interface PaymentFormProps {
+  onSubmit: (e: React.FormEvent) => void;
+  initialPackage?: string;
+}
+
+const packages: Package[] = [
+  {
+    id: "1year",
+    name: "1-Year Plan",
+    price: 29.99,
+    period: "year",
+    description: "Best value for serious streamers",
+  },
+  {
+    id: "2year",
+    name: "2-Year Plan",
+    price: 49.99,
+    period: "2 years",
+    description: "Extended entertainment package",
+    popular: true,
+  },
+];
+
+const additionalFeatures: Feature[] = [
+  { id: "nude", label: "+18 Package", price: 4.99 },
+];
+
+const countries: Country[] = [
+  { code: "NL", name: "Netherlands" },
+  { code: "IT", name: "Italy" },
+  { code: "BE", name: "Belgium" },
+  { code: "FR", name: "France" },
+  { code: "DE", name: "Germany" },
+  { code: "ES", name: "Spain" },
+  { code: "PT", name: "Portugal" },
+];
 
 export const PaymentForm = memo(function PaymentForm({ onSubmit, initialPackage }: PaymentFormProps) {
-  // ... (keep all your existing state)
+  const [selectedPackageId, setSelectedPackageId] = useState(initialPackage || "2year");
+  const [couponCode, setCouponCode] = useState("");
+  const [couponDiscount, setCouponDiscount] = useState<{
+    type: 'percentage' | 'fixed';
+    value: number;
+  } | null>(null);
+  const [show3DSDialog, setShow3DSDialog] = useState(false);
+  const [threeDSData, setThreeDSData] = useState<{
+    url: string;
+    method: string;
+    payload: Record<string, string>;
+  } | null>(null);
+  const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
+  const [selectedCountry, setSelectedCountry] = useState("");
+  const { toast } = useToast();
+  const router = useRouter();
+  const posthog = usePostHog();
   const [selectedGateway, setSelectedGateway] = useState<'sumup' | 'stripe'>('sumup');
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const { activeGateway, stripePublishableKey } = usePaymentGateway();
 
+  const selectedPackage = packages.find((pkg) => pkg.id === selectedPackageId);
+
+  const removeCoupon = useCallback(() => {
+    setCouponCode('');
+    setCouponDiscount(null);
+    toast({
+      title: "Coupon Removed",
+      description: "The discount has been removed from your order",
+    });
+  }, [toast]);
+
+  const validateCoupon = useCallback(async () => {
+    if (!couponCode) return;
+    
+    setIsValidatingCoupon(true);
+    try {
+      const response = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code: couponCode }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        const currentTotal = calculateSubtotal();
+        let discountedAmount = currentTotal;
+        
+        if (data.discount_type === 'percentage') {
+          discountedAmount = currentTotal * (1 - data.discount_value / 100);
+        } else {
+          discountedAmount = Math.max(0, currentTotal - data.discount_value);
+        }
+
+        if (discountedAmount < 1) {
+          toast({
+            title: "Invalid Coupon",
+            description: "This coupon cannot be applied to the current order amount",
+            variant: "destructive",
+          });
+          setCouponDiscount(null);
+          return;
+        }
+
+        setCouponDiscount({
+          type: data.discount_type,
+          value: data.discount_value,
+        });
+        toast({
+          title: "Coupon Applied",
+          description: `Discount of ${data.discount_value}${data.discount_type === 'percentage' ? '%' : '€'} applied`,
+        });
+      } else {
+        toast({
+          title: "Invalid Coupon",
+          description: data.error,
+          variant: "destructive",
+        });
+        setCouponDiscount(null);
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to validate coupon",
+        variant: "destructive",
+      });
+    } finally {
+      setIsValidatingCoupon(false);
+    }
+  }, [couponCode, toast]);
+
+  const calculateSubtotal = useCallback(() => {
+    if (!selectedPackage) return 0;
+    
+    let total = selectedPackage.price;
+    
+    selectedFeatures.forEach((feature) => {
+      const additionalFeature = additionalFeatures.find((f) => f.id === feature);
+      if (additionalFeature) {
+        total += additionalFeature.price;
+      }
+    });
+
+    return Number(total.toFixed(2));
+  }, [selectedPackage, selectedFeatures]);
+
+  const calculateTotal = useCallback(() => {
+    let total = calculateSubtotal();
+
+    if (couponDiscount) {
+      if (couponDiscount.type === 'percentage') {
+        total = total * (1 - couponDiscount.value / 100);
+      } else {
+        total = Math.max(1, total - couponDiscount.value);
+      }
+    }
+
+    return Number(total.toFixed(2));
+  }, [calculateSubtotal, couponDiscount]);
+
+  const handleFeatureToggle = useCallback((featureId: string, checked: boolean) => {
+    setSelectedFeatures(prev =>
+      checked
+        ? [...prev, featureId]
+        : prev.filter((id) => id !== featureId)
+    );
+  }, []);
+
   useEffect(() => {
     setSelectedGateway(activeGateway);
   }, [activeGateway]);
+
+  const validateForm = (formData: FormData) => {
+    const errors: string[] = [];
+    
+    const cardNumber = formData.get("card") as string;
+    const expiry = formData.get("expiry") as string;
+    const cvv = formData.get("cvv") as string;
+    const email = formData.get("email") as string;
+    const name = formData.get("name") as string;
+    const phone = formData.get("phone") as string;
+
+    if (!isValidCardNumber(cardNumber)) {
+      errors.push("Invalid card number");
+    }
+    if (!isValidExpiryDate(expiry)) {
+      errors.push("Invalid expiry date");
+    }
+    if (!isValidCVV(cvv)) {
+      errors.push("Invalid CVV");
+    }
+    if (!isValidEmail(email)) {
+      errors.push("Invalid email address");
+    }
+    if (!isValidName(name)) {
+      errors.push("Invalid name");
+    }
+    if (!isValidPhone(phone)) {
+      errors.push("Invalid phone number");
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  };
+
+  const createCheckout = async (formData: FormData) => {
+    const response = await fetch("/api/sumup/create-checkout", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount: calculateTotal(),
+        currency: "EUR",
+        pay_to_email: formData.get("email"),
+        description: `Payment for ${selectedPackage?.name}`,
+        customer_id: formData.get("email"),
+        customer_email: formData.get("email"),
+        return_url: `${window.location.origin}/success`,
+        checkout_reference: `ORDER-${Date.now()}`,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to create checkout");
+    }
+
+    const data = await response.json();
+    return data.id;
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -130,8 +376,6 @@ export const PaymentForm = memo(function PaymentForm({ onSubmit, initialPackage 
     if (checkout_reference) {
       localStorage.setItem('lastOrderReference', checkout_reference);
     }
-
-    // The actual payment will be handled by the Stripe Elements component
   };
 
   const handleSumUpPayment = async (formData: FormData) => {
@@ -152,13 +396,93 @@ export const PaymentForm = memo(function PaymentForm({ onSubmit, initialPackage 
       cvv: formData.get("cvv"),
     };
 
-    await completeCheckout(checkoutId, {
-      payment_type: "card",
-      card: cardData,
+    const response = await fetch(`/api/sumup/complete-checkout/${checkoutId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        payment_type: "card",
+        card: cardData,
+      }),
     });
+
+    const result = await response.json();
+
+    if (result.status === "3ds_required" && result.next_step) {
+      setThreeDSData(result.next_step);
+      setShow3DSDialog(true);
+      pollPaymentStatus(checkoutId);
+    } else if (result.status === "PAID") {
+      posthog.capture('checkout_completed', {
+        package: selectedPackageId,
+        features: selectedFeatures,
+        total: calculateTotal()
+      });
+      router.push("/success");
+    } else if (result.status === "FAILED") {
+      posthog.capture('checkout_failed', {
+        reason: 'payment_failed'
+      });
+      router.push("/failed?reason=payment_failed");
+    }
   };
 
-  // ... (keep all your existing helper functions)
+  const pollPaymentStatus = async (checkoutId: string) => {
+    const maxAttempts = 30;
+    let attempts = 0;
+
+    const checkStatus = async () => {
+      if (attempts >= maxAttempts) {
+        setShow3DSDialog(false);
+        posthog.capture('checkout_failed', {
+          reason: '3ds_timeout'
+        });
+        router.push("/failed?reason=3ds_timeout");
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/sumup/complete-checkout/${checkoutId}`, {
+          method: 'GET',
+        });
+        const result = await response.json();
+
+        if (result.status === 'PAID') {
+          setShow3DSDialog(false);
+          posthog.capture('checkout_completed', {
+            package: selectedPackageId,
+            features: selectedFeatures,
+            total: calculateTotal(),
+            payment_method: '3ds'
+          });
+          router.push("/success");
+          return;
+        } else if (result.status === 'FAILED') {
+          setShow3DSDialog(false);
+          posthog.capture('checkout_failed', {
+            reason: 'payment_failed',
+            payment_method: '3ds'
+          });
+          router.push("/failed?reason=payment_failed");
+          return;
+        }
+
+        attempts++;
+        setTimeout(checkStatus, 2000);
+      } catch (error) {
+        console.error('Error polling payment status:', error);
+        setShow3DSDialog(false);
+        posthog.capture('checkout_failed', {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          payment_method: '3ds'
+        });
+        router.push("/failed?reason=payment_failed");
+      }
+    };
+
+    checkStatus();
+  };
 
   const paymentForm = (
     <div className="max-w-3xl mx-auto space-y-8">
@@ -221,7 +545,7 @@ export const PaymentForm = memo(function PaymentForm({ onSubmit, initialPackage 
               size="lg"
               disabled={isProcessing}
             >
-              {isProcessing ? "Processing..." : `Pay ${calculateTotal()} EUR Now`}
+              {isProcessing ? "Processing..." : `Pay ${calculateTotal().toFixed(2)} EUR Now`}
             </Button>
             <Button
               variant="outline"
@@ -257,7 +581,6 @@ export const PaymentForm = memo(function PaymentForm({ onSubmit, initialPackage 
     </div>
   );
 
-  // Wrap with Stripe Elements if using Stripe and we have a client secret
   if (selectedGateway === 'stripe' && clientSecret && stripePublishableKey) {
     return (
       <StripePaymentProvider

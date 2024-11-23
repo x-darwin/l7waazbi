@@ -21,11 +21,11 @@ export async function POST(req: Request) {
     const ip = headersList.get('x-forwarded-for') || headersList.get('x-real-ip') || '';
     
     const parser = new UAParser(userAgent);
-    const deviceInfo = {
+    const deviceInfo = JSON.stringify({
       device: parser.getDevice(),
       os: parser.getOS(),
       browser: parser.getBrowser()
-    };
+    });
 
     const stripe = await getStripe();
 
